@@ -1,84 +1,112 @@
 # encoding: utf-8
 """
-@author:  sherlock
-@contact: sherlockliao01@gmail.com
+Custom Labeling Script
 """
 
 import glob
 import re
+import os
+import shutil
 
-import os.path as osp
+# Directory where your existing labeled dataset is stored
+existing_data_dir = '/content/CLIP-ReID/Market-1501-v15.09.15'
 
-from .bases import BaseImageDataset
-from collections import defaultdict
-import pickle
-class Market1501(BaseImageDataset):
-    """
-    Market1501
-    Reference:
-    Zheng et al. Scalable Person Re-identification: A Benchmark. ICCV 2015.
-    URL: http://www.liangzheng.org/Project/project_reid.html
+# Directories within the existing dataset
+train_dir = os.path.join(existing_data_dir, 'bounding_box_train')
+query_dir = os.path.join(existing_data_dir, 'query')
+gallery_dir = os.path.join(existing_data_dir, 'bounding_box_test')
 
-    Dataset statistics:
-    # identities: 1501 (+1 for background)
-    # images: 12936 (train) + 3368 (query) + 15913 (gallery)
-    """
-    dataset_dir = 'Market-1501-v15.09.15'
+# Directory where your new images are stored
+new_data_dir = '/content/new_images'
 
-    def __init__(self, root='', verbose=True, pid_begin = 0, **kwargs):
-        super(Market1501, self).__init__()
-        self.dataset_dir = osp.join(root, self.dataset_dir)
-        self.train_dir = osp.join(self.dataset_dir, 'bounding_box_train')
-        self.query_dir = osp.join(self.dataset_dir, 'query')
-        self.gallery_dir = osp.join(self.dataset_dir, 'bounding_box_test')
+# Pattern to extract pid and camid from filenames. Not sure if we need to change the regex pattern here?
+pattern = re.compile(r'([-]?\d+)_c(\d)s\d+_\d+_\d+\.jpg')
 
-        self._check_before_run()
-        self.pid_begin = pid_begin
-        train = self._process_dir(self.train_dir, relabel=True)
-        query = self._process_dir(self.query_dir, relabel=False)
-        gallery = self._process_dir(self.gallery_dir, relabel=False)
+# Function to process directory
+def process_new_images(dir_path, output_dir):
+    img_paths = glob.glob(os.path.join(dir_path, '*.jpg'))
+    dataset = []
 
-        if verbose:
-            print("=> Market1501 loaded")
-            self.print_dataset_statistics(train, query, gallery)
-
-        self.train = train
-        self.query = query
-        self.gallery = gallery
-
-        self.num_train_pids, self.num_train_imgs, self.num_train_cams, self.num_train_vids = self.get_imagedata_info(self.train)
-        self.num_query_pids, self.num_query_imgs, self.num_query_cams, self.num_query_vids = self.get_imagedata_info(self.query)
-        self.num_gallery_pids, self.num_gallery_imgs, self.num_gallery_cams, self.num_gallery_vids = self.get_imagedata_info(self.gallery)
-
-    def _check_before_run(self):
-        """Check if all files are available before going deeper"""
-        if not osp.exists(self.dataset_dir):
-            raise RuntimeError("'{}' is not available".format(self.dataset_dir))
-        if not osp.exists(self.train_dir):
-            raise RuntimeError("'{}' is not available".format(self.train_dir))
-        if not osp.exists(self.query_dir):
-            raise RuntimeError("'{}' is not available".format(self.query_dir))
-        if not osp.exists(self.gallery_dir):
-            raise RuntimeError("'{}' is not available".format(self.gallery_dir))
-
-    def _process_dir(self, dir_path, relabel=False):
-        img_paths = glob.glob(osp.join(dir_path, '*.jpg'))
-        pattern = re.compile(r'([-\d]+)_c(\d)')
-
-        pid_container = set()
-        for img_path in sorted(img_paths):
-            pid, _ = map(int, pattern.search(img_path).groups())
-            if pid == -1: continue  # junk images are just ignored
-            pid_container.add(pid)
-        pid2label = {pid: label for label, pid in enumerate(pid_container)}
-        dataset = []
-        for img_path in sorted(img_paths):
-            pid, camid = map(int, pattern.search(img_path).groups())
-            if pid == -1: continue  # junk images are just ignored
-            assert 0 <= pid <= 1501  # pid == 0 means background
+    for img_path in sorted(img_paths):
+        match = pattern.search(os.path.basename(img_path))
+        if match:
+            pid, camid = map(int, match.groups())
+            if pid == -1 or camid == -1:
+                continue  # Skip images with pid or camid as -1
             assert 1 <= camid <= 6
             camid -= 1  # index starts from 0
-            if relabel: pid = pid2label[pid]
 
-            dataset.append((img_path, self.pid_begin + pid, camid, 0))
-        return dataset
+            # Append data (format used by og script: img_path, pid, camid, 0)
+            dataset.append((img_path, pid, camid, 0))
+
+            # Need to Move the image to a separate directory
+            shutil.copy(img_path, output_dir)
+
+    return dataset
+
+# Ensure output directories exist
+os.makedirs(train_dir, exist_ok=True)
+os.makedirs(query_dir, exist_ok=True)
+os.makedirs(gallery_dir, exist_ok=True)
+
+# Process new images and integrate them into the existing dataset
+new_train_images = process_new_images(new_data_dir, train_dir)
+new_query_images = process_new_images(new_data_dir, query_dir)
+new_gallery_images = process_new_images(new_data_dir, gallery_dir)
+
+print("=> New images processed and integrated into the existing dataset")
+
+# Here is the temp script to run data labeling when we do it in collab. 
+# DELETE LATER. EACH IS SUPPOSED TO REPRESENT A CELL. 
+import os
+import re
+import glob
+import shutil
+
+# Directory where your existing labeled dataset is stored
+existing_data_dir = '/content/CLIP-ReID/Market-1501-v15.09.15'
+
+# Directories within the existing dataset
+train_dir = os.path.join(existing_data_dir, 'bounding_box_train')
+query_dir = os.path.join(existing_data_dir, 'query')
+gallery_dir = os.path.join(existing_data_dir, 'bounding_box_test')
+
+# Directory where your new images are stored
+new_data_dir = '/content/new_images'
+
+# Pattern to extract pid and camid from filenames
+pattern = re.compile(r'([-]?\d+)_c(\d)s\d+_\d+_\d+\.jpg')
+
+# Function to process directory
+def process_new_images(dir_path, output_dir):
+    img_paths = glob.glob(os.path.join(dir_path, '*.jpg'))
+    dataset = []
+
+    for img_path in sorted(img_paths):
+        match = pattern.search(os.path.basename(img_path))
+        if match:
+            pid, camid = map(int, match.groups())
+            if pid == -1 or camid == -1:
+                continue  # Skip images with pid or camid as -1
+            assert 1 <= camid <= 6
+            camid -= 1  # index starts from 0
+
+            # Append data in the required format
+            dataset.append((img_path, pid, camid, 0))
+
+            # Move the image to the appropriate directory
+            shutil.copy(img_path, output_dir)
+
+    return dataset
+
+# Ensure output directories exist
+os.makedirs(train_dir, exist_ok=True)
+os.makedirs(query_dir, exist_ok=True)
+os.makedirs(gallery_dir, exist_ok=True)
+
+# Process new images and integrate them into the existing dataset
+new_train_images = process_new_images(new_data_dir, train_dir)
+new_query_images = process_new_images(new_data_dir, query_dir)
+new_gallery_images = process_new_images(new_data_dir, gallery_dir)
+
+print("New images have been labeled and integrated into the existing dataset.")
